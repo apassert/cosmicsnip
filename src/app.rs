@@ -9,8 +9,9 @@ use std::process::{Command, Stdio};
 use cosmic::app::{Core, Task};
 use cosmic::iced::keyboard::{self, Key, key::Named};
 use cosmic::iced::widget::image::Handle;
+use cosmic::iced::widget::stack;
 use cosmic::iced::{
-    Background, Border, Color, Length, Point as IPoint, Rectangle, Subscription, mouse,
+    Background, Border, Color, ContentFit, Length, Point as IPoint, Rectangle, Subscription, mouse,
 };
 use cosmic::widget::canvas::{self, Frame, Geometry, Path, Program, Stroke as IStroke};
 use cosmic::widget::{self, button, container};
@@ -299,14 +300,22 @@ impl cosmic::Application for App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        container(
-            canvas::Canvas::new(Board { app: self })
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        // The snip and the strokes are separate layers: within one layer the
+        // renderer paints images after meshes, so a snip drawn by the canvas
+        // itself would cover every stroke. `stack` gives the canvas its own
+        // layer above the image. ScaleDown centres the snip and never
+        // enlarges it, which is what `Fit` assumes.
+        let snip = widget::image(self.handle.clone())
+            .content_fit(ContentFit::ScaleDown)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        let board = canvas::Canvas::new(Board { app: self })
+            .width(Length::Fill)
+            .height(Length::Fill);
+        container(stack([snip.into(), board.into()]))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 
@@ -458,14 +467,6 @@ impl Program<Message, Theme, Renderer> for Board<'_> {
     ) -> Vec<Geometry> {
         let fit = self.fit(bounds);
         let mut frame = Frame::new(renderer, bounds.size());
-        let snip = Rectangle::new(
-            fit.to_canvas(Point::new(0.0, 0.0)),
-            cosmic::iced::Size::new(
-                self.app.snip.width() as f32 * fit.scale,
-                self.app.snip.height() as f32 * fit.scale,
-            ),
-        );
-        frame.draw_image(snip, &self.app.handle);
         for stroke in self.app.doc.all() {
             draw_stroke(&mut frame, &fit, stroke);
         }
