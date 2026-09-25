@@ -61,6 +61,11 @@ fn percent_decode(s: &str) -> String {
 /// Asks the portal for an interactive screenshot. `Ok(None)` means the user
 /// pressed Esc in the portal's selection.
 pub async fn request() -> Result<Option<Pixmap>, String> {
+    // The portal answers `clipboard:///` before it has written the clipboard
+    // (xdg-desktop-portal-cosmic sends the reply, then runs the write task), so
+    // an immediate read returns whatever was there before - often the previous
+    // snip. Remember that, and wait for the clipboard to change.
+    let before = clipboard_png();
     let request = Screenshot::request()
         .interactive(true)
         .modal(true)
@@ -76,37 +81,44 @@ pub async fn request() -> Result<Option<Pixmap>, String> {
         Location::File(path) => {
             std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?
         }
-        Location::Clipboard => read_clipboard_png()?,
+        Location::Clipboard => read_fresh_clipboard_png(before.as_deref())?,
     };
     render::decode_png(&bytes).map(Some)
 }
 
-/// The portal sets the clipboard before it answers, but give it a moment in
-/// case the offer reaches this client after the reply does.
-fn read_clipboard_png() -> Result<Vec<u8>, String> {
-    let mut last = String::new();
-    for _ in 0..20 {
-        match paste::get_contents(
-            paste::ClipboardType::Regular,
-            paste::Seat::Unspecified,
-            paste::MimeType::Specific("image/png"),
-        ) {
-            Ok((mut pipe, _)) => {
-                let mut bytes = Vec::new();
-                pipe.read_to_end(&mut bytes)
-                    .map_err(|e| format!("cannot read the clipboard: {e}"))?;
-                if !bytes.is_empty() {
-                    return Ok(bytes);
-                }
-                last = "the clipboard image is empty".into();
-            }
-            Err(e) => last = e.to_string(),
+/// The `image/png` on the clipboard now, if any.
+fn clipboard_png() -> Option<Vec<u8>> {
+    let (mut pipe, _) = paste::get_contents(
+        paste::ClipboardType::Regular,
+        paste::Seat::Unspecified,
+        paste::MimeType::Specific("image/png"),
+    )
+    .ok()?;
+    let mut bytes = Vec::new();
+    pipe.read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+/// True when `now` is a picture the clipboard did not hold before the request.
+pub fn is_fresh(before: Option<&[u8]>, now: &[u8]) -> bool {
+    !now.is_empty() && before != Some(now)
+}
+
+/// Waits for the portal's copy to replace what was on the clipboard.
+fn read_fresh_clipboard_png(before: Option<&[u8]>) -> Result<Vec<u8>, String> {
+    for _ in 0..100 {
+        if let Some(now) = clipboard_png()
+            && is_fresh(before, &now)
+        {
+            return Ok(now);
         }
         thread::sleep(Duration::from_millis(50));
     }
-    Err(format!(
-        "the portal copied the screenshot, but it cannot be read back: {last}"
-    ))
+    Err(
+        "the portal said it copied the snip, but after 5 s the clipboard still \
+         holds what it held before"
+            .into(),
+    )
 }
 
 #[cfg(test)]
@@ -124,6 +136,15 @@ mod tests {
     #[test]
     fn the_clipboard_uri_is_the_clipboard() {
         assert_eq!(locate("clipboard:///").unwrap(), Location::Clipboard);
+    }
+
+    #[test]
+    fn the_previous_clipboard_image_is_not_the_snip() {
+        let old = [1u8, 2, 3];
+        assert!(!is_fresh(Some(&old), &old));
+        assert!(is_fresh(Some(&old), &[4, 5]));
+        assert!(is_fresh(None, &[4, 5]));
+        assert!(!is_fresh(None, &[]));
     }
 
     #[test]
