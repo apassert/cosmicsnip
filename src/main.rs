@@ -57,12 +57,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    drop(runtime);
 
     let width = (snip.width() as f32).clamp(560.0, 1600.0);
     let height = (snip.height() as f32 + 56.0).clamp(360.0, 1000.0);
     let settings = cosmic::app::Settings::default().size(cosmic::iced::Size::new(width, height));
-    match cosmic::app::run::<App>(settings, Flags { snip }) {
+    let result = cosmic::app::run::<App>(settings, Flags { snip });
+    drop(runtime);
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("cosmicsnip: {e}");
