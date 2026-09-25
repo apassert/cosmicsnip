@@ -45,6 +45,7 @@ the desktop.
 - Pen, highlighter, arrow, rectangle
 - 6-colour palette and adjustable stroke width
 - Undo (`Ctrl+Z`, up to 200 steps)
+- Remembers your colour and stroke widths for the next snip; every snip starts with the pen
 
 **Output**
 - `Ctrl+C` copies the annotated snip at full resolution and closes; it stays

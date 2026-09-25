@@ -20,6 +20,8 @@ with CosmicSnip's annotation editor after the snip.
   the window closes and exits when something else is copied.
 
 ### Changed
+- The editor remembers the colour and the pen and highlighter widths in
+  `~/.config/cosmicsnip/editor.conf`; every snip starts with the pen.
 - One-shot: run, select, annotate, copy or save, exit. Bind it to a shortcut.
 - Installed with `just install` (to `~/.local`) or
   `sudo just prefix=/usr install`.
