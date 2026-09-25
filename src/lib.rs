@@ -7,4 +7,5 @@ pub mod app;
 pub mod capture;
 pub mod clipboard;
 pub mod config;
+pub mod prefs;
 pub mod render;

@@ -19,6 +19,7 @@ use cosmic::{Element, Renderer, Theme};
 use tiny_skia::Pixmap;
 
 use crate::annotation::{Document, Point, Shape, Stroke, Tool, arrow_barbs};
+use crate::prefs::Prefs;
 use crate::{clipboard, config, render};
 
 pub const APP_ID: &str = "io.github.itssoup.CosmicSnip";
@@ -36,7 +37,7 @@ pub enum Message {
     Undo,
     Copy,
     Save,
-    Saved(Option<PathBuf>),
+    Saved(Result<Option<PathBuf>, String>),
     New,
     Exit,
     Begin(Point),
@@ -65,6 +66,18 @@ impl App {
         }
     }
 
+    /// Colour and widths carry over to the next snip; the tool does not.
+    fn remember(&self) {
+        let prefs = Prefs {
+            color: self.color,
+            pen_width: self.pen_width,
+            highlight_width: self.highlight_width,
+        };
+        if let Err(e) = prefs.store() {
+            log::warn!("{e}");
+        }
+    }
+
     fn change_width(&mut self, delta: f32) {
         match self.tool {
             Tool::Highlighter => {
@@ -76,6 +89,7 @@ impl App {
                     (self.pen_width + delta).clamp(config::PEN_WIDTH_MIN, config::PEN_WIDTH_MAX);
             }
         }
+        self.remember();
     }
 
     /// The snip with every committed stroke, at the snip's own resolution.
@@ -106,14 +120,11 @@ impl App {
                 .title("Save snip".to_string())
                 .directory(dir)
                 .file_name(name);
-            let path = match dialog.save_file().await {
-                Ok(response) => response.url().and_then(|u| u.to_file_path().ok()),
-                Err(e) => {
-                    log::info!("save dialog: {e}");
-                    None
-                }
-            };
-            Message::Saved(path)
+            Message::Saved(match dialog.save_file().await {
+                Ok(response) => Ok(response.url().and_then(|u| u.to_file_path().ok())),
+                Err(cosmic::dialog::file_chooser::Error::Cancelled) => Ok(None),
+                Err(e) => Err(format!("save dialog failed: {e}")),
+            })
         })
     }
 
@@ -194,15 +205,16 @@ impl cosmic::Application for App {
             rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
         }
         let handle = Handle::from_rgba(snip.width(), snip.height(), rgba);
+        let prefs = Prefs::load();
         let app = App {
             core,
             snip,
             handle,
             doc: Document::default(),
             tool: Tool::Pen,
-            color: 0,
-            pen_width: config::DEFAULT_PEN_WIDTH,
-            highlight_width: config::DEFAULT_HIGHLIGHT_WIDTH,
+            color: prefs.color,
+            pen_width: prefs.pen_width,
+            highlight_width: prefs.highlight_width,
             error: None,
         };
         (app, Task::none())
@@ -219,7 +231,10 @@ impl cosmic::Application for App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tool(tool) => self.tool = tool,
-            Message::Color(i) => self.color = i.min(config::PALETTE.len() - 1),
+            Message::Color(i) => {
+                self.color = i.min(config::PALETTE.len() - 1);
+                self.remember();
+            }
             Message::Wider => self.change_width(1.0),
             Message::Narrower => self.change_width(-1.0),
             Message::Undo => {
@@ -227,8 +242,12 @@ impl cosmic::Application for App {
             }
             Message::Copy => return self.copy_and_exit(),
             Message::Save => return self.save(),
-            Message::Saved(None) => {}
-            Message::Saved(Some(path)) => {
+            Message::Saved(Ok(None)) => {}
+            Message::Saved(Err(e)) => {
+                log::error!("{e}");
+                self.error = Some(e);
+            }
+            Message::Saved(Ok(Some(path))) => {
                 match self.export().and_then(|png| {
                     std::fs::write(&path, png)
                         .map_err(|e| format!("cannot write {}: {e}", path.display()))
