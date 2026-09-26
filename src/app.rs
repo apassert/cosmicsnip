@@ -115,12 +115,15 @@ impl App {
             "snip-{}.png",
             jiff::Zoned::now().strftime("%Y-%m-%d-%H%M%S")
         );
+        log::debug!("save: asking the portal for a path in {}", dir.display());
         cosmic::task::future(async move {
             let dialog = cosmic::dialog::file_chooser::save::Dialog::new()
                 .title("Save snip".to_string())
                 .directory(dir)
                 .file_name(name);
-            Message::Saved(match dialog.save_file().await {
+            let answer = dialog.save_file().await;
+            log::debug!("save: portal answered, ok = {}", answer.is_ok());
+            Message::Saved(match answer {
                 Ok(response) => Ok(response.url().and_then(|u| u.to_file_path().ok())),
                 Err(cosmic::dialog::file_chooser::Error::Cancelled) => Ok(None),
                 Err(e) => Err(format!("save dialog failed: {e}")),
@@ -241,7 +244,10 @@ impl cosmic::Application for App {
                 self.doc.undo();
             }
             Message::Copy => return self.copy_and_exit(),
-            Message::Save => return self.save(),
+            Message::Save => {
+                log::debug!("save: requested");
+                return self.save();
+            }
             Message::Saved(Ok(None)) => {}
             Message::Saved(Err(e)) => {
                 log::error!("{e}");

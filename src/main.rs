@@ -39,7 +39,13 @@ fn main() -> ExitCode {
         };
     }
 
-    let runtime = match tokio::runtime::Builder::new_current_thread()
+    // ashpd keeps one D-Bus connection for the whole process, and its reader
+    // task runs on the runtime that opened it. A current-thread runtime only
+    // runs tasks inside `block_on`, so once the editor opened, that task never
+    // ran again and the save dialog's request hung. This runtime has its own
+    // worker thread and lives until the program exits.
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
         .enable_all()
         .build()
     {
